@@ -1,0 +1,81 @@
+- name: Установка Docker и запуск скрипта
+  hosts: test-vm
+  become: true
+
+  vars:
+    docker_image_name: http_check
+    docker_tag: v1.0
+    docker_full: "{{ docker_image_name }}:{{ docker_tag }}"
+    container_name: http_check_container
+
+  tasks:
+    - name: Установить зависимости
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: yes
+
+    - name: Добавить официальный GPG ключ Docker
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Добавить Docker репозиторий
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable
+        state: present
+        filename: docker
+
+    - name: Установить Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: latest
+        update_cache: yes
+
+    - name: Убедиться, что Docker запущен
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Копировать скрипт и Dockerfile на удалённую машину
+      copy:
+        src: ../http_check/
+        dest: /opt/http_check/
+        mode: preserve
+
+    - name: Собрать Docker-образ
+      docker_image:
+        name: "{{ docker_image_name }}"
+        tag: "{{ docker_tag }}"
+        source: build
+        build:
+          path: /opt/http_check
+        
+    - name: Запустить контейнер
+      docker_container:
+        name: "{{ container_name }}"
+        image: "{{ docker_full }}"
+        state: started
+        interactive: true
+        tty: true
+        command: ["python3", "http_check.py"]
+
+    - name: Подождать 5 секунд (для генерации логов)
+      pause:
+        seconds: 5
+
+    - name: Показать логи контейнера
+      command: docker logs {{ container_name }}
+      register: container_logs
+
+    - name: Вывод логов контейнера
+      debug:
+        msg: "{{ container_logs.stdout }}"
